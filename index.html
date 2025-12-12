@@ -47,16 +47,10 @@
       </table>
 
       <h3>Anthropometrics</h3>
-      <label class="small">Subject mass (kg)</label>
+      <label class="small">Body mass (kg)</label>
       <input id="subjectMass" type="number" value="70" />
-      <label class="small">Upper arm length (m)</label>
-      <input id="upperArmL" type="number" step="0.01" value="0.30" />
-      <label class="small">Forearm length (m)</label>
-      <input id="forearmL" type="number" step="0.01" value="0.25" />
-      <label class="small">Upper arm mass (kg)</label>
-      <input id="upperArmM" type="number" step="0.1" value="1.5" />
-      <label class="small">Forearm mass (kg)</label>
-      <input id="forearmM" type="number" step="0.1" value="1.0" />
+      <label class="small">Body height (m)</label>
+      <input id="subjectHeight" type="number" step="0.01" value="1.75" />
       <div class="row">
         <button id="applyAnthro">Apply anthropometrics</button>
         <button id="resetAnthro">Reset defaults</button>
@@ -121,10 +115,7 @@
     const kinTable = document.querySelector('#kinTable tbody');
 
     const subjectMassInput = document.getElementById('subjectMass');
-    const upperArmLInput = document.getElementById('upperArmL');
-    const forearmLInput = document.getElementById('forearmL');
-    const upperArmMInput = document.getElementById('upperArmM');
-    const forearmMInput = document.getElementById('forearmM');
+    const subjectHeightInput = document.getElementById('subjectHeight');
     const applyAnthro = document.getElementById('applyAnthro');
     const resetAnthro = document.getElementById('resetAnthro');
 
@@ -141,29 +132,48 @@
     let lastAngles = {};
     let lastTime = null;
 
-    // anthropometrics params
-    let anthro = { subjectMass:70, upperArmL:0.30, forearmL:0.25, upperArmM:1.5, forearmM:1.0 };
+    // anthropometrics params (internal: derived from mass & height)
+    // Rough proportions from standard anthropometry (Winter-style):
+    // upperArmL ≈ 0.188 * height, forearmL ≈ 0.146 * height
+    // upperArmM ≈ 2.8% body mass, forearmM ≈ 1.6% body mass
+    let anthro = {
+      subjectMass: 70,
+      subjectHeight: 1.75,
+      upperArmL: 0.188 * 1.75,
+      forearmL: 0.146 * 1.75,
+      upperArmM: 0.028 * 70,
+      forearmM: 0.016 * 70
+    };
+
     function applyAnthroFromUI(){
-      anthro.subjectMass = Number(subjectMassInput.value) || 70;
-      anthro.upperArmL = Number(upperArmLInput.value) || 0.30;
-      anthro.forearmL = Number(forearmLInput.value) || 0.25;
-      anthro.upperArmM = Number(upperArmMInput.value) || 1.5;
-      anthro.forearmM = Number(forearmMInput.value) || 1.0;
-      // compute COM and inertia approximations using Winter proportions
+      const mass = Number(subjectMassInput.value) || 70;
+      const height = Number(subjectHeightInput.value) || 1.75;
+
+      anthro.subjectMass = mass;
+      anthro.subjectHeight = height;
+
+      anthro.upperArmL = 0.188 * height;
+      anthro.forearmL = 0.146 * height;
+      anthro.upperArmM = 0.028 * mass;
+      anthro.forearmM = 0.016 * mass;
+
+      // COM and inertias (rough)
       anthro.upperArmCOM = anthro.upperArmL * 0.436; // Winter
       anthro.forearmCOM = anthro.forearmL * 0.430;
-      anthro.upperArmI = (anthro.upperArmM * Math.pow(anthro.upperArmL,2)) * 0.05; // rough
+      anthro.upperArmI = (anthro.upperArmM * Math.pow(anthro.upperArmL,2)) * 0.05;
       anthro.forearmI = (anthro.forearmM * Math.pow(anthro.forearmL,2)) * 0.04;
+
       console.log('Anthro applied', anthro);
     }
+
     function resetAnthroFn(){
-      subjectMassInput.value = anthro.subjectMass = 70;
-      upperArmLInput.value = anthro.upperArmL = 0.30;
-      forearmLInput.value = anthro.forearmL = 0.25;
-      upperArmMInput.value = anthro.upperArmM = 1.5;
-      forearmMInput.value = anthro.forearmM = 1.0;
+      anthro.subjectMass = 70;
+      anthro.subjectHeight = 1.75;
+      subjectMassInput.value = anthro.subjectMass;
+      subjectHeightInput.value = anthro.subjectHeight.toFixed(2);
       applyAnthroFromUI();
     }
+
     applyAnthro.addEventListener('click', applyAnthroFromUI);
     resetAnthro.addEventListener('click', resetAnthroFn);
     resetAnthroFn();
@@ -230,13 +240,14 @@
       return Math.acos(cos)*180/Math.PI;
     }
 
-    // inverse dynamics (very simplified 2D planar chain per arm using landmarks projected)
+    // inverse dynamics (simplified 2D planar chain per arm)
     function inverseDynamicsArm(theta_shoulder_deg, theta_elbow_deg, theta_shoulder_vel, theta_elbow_vel, theta_shoulder_acc, theta_elbow_acc){
       const g = 9.80665;
       const ua = anthro.upperArmM; const fa = anthro.forearmM;
       const la = anthro.upperArmL; const lf = anthro.forearmL;
       const ra = anthro.upperArmCOM; const rf = anthro.forearmCOM;
       const Ia = anthro.upperArmI; const If = anthro.forearmI;
+
       const th1 = theta_shoulder_deg*Math.PI/180; const th2 = theta_elbow_deg*Math.PI/180;
       const dth1 = theta_shoulder_vel*Math.PI/180; const dth2 = theta_elbow_vel*Math.PI/180;
       const ddth1 = theta_shoulder_acc*Math.PI/180; const ddth2 = theta_elbow_acc*Math.PI/180;
@@ -292,7 +303,7 @@
     }
     await initPoseLandmarker();
 
-    // Per-joint OneEuro filters map keyed by joint name + component
+    // Per-joint OneEuro filters map keyed by joint name
     const filters = {};
     function getFilter(key){
       const minCutoff = Number(minCutoffInput.value) || 1.0;
